@@ -48,6 +48,3 @@ Worth being precise, because "hospital AI" covers wildly different things:
 - **Not a complete EHR interface.** FHIR read for four resources, one write path, no deletions, no incremental sync yet.
 - **Not self-learning.** It won't get smarter from use; it gets *tuned* when someone recalibrates the weights against your no-show and denial outcomes. That's a feature for a regulated setting, and a limitation if you expected otherwise.
 
-If you want the one-line version: **it's a small, auditable operations layer that turns hospital data into ranked, explained next actions — and refuses to do anything irreversible without a second human.**
-
-Want me to walk through one concrete request end to end (say, the morning digest) so you can see the actual tool calls and output?
