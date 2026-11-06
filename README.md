@@ -260,8 +260,45 @@ Plus:
 | `HA_RATE_LIMIT_RPM` | `240` | per API key, per process |
 | `HA_MAX_BODY_BYTES` | `1048576` | request size cap |
 | `HA_MCP_ROLE` / `HA_MCP_PURPOSE` | `admin` / `operations` | MCP principal |
+| `HA_FHIR_BASE_URL` | empty | FHIR R4 base URL. Empty = no EHR, synthetic data only |
+| `HA_FHIR_TOKEN` | empty | bearer credential; environment only, never logged |
+| `HA_FHIR_MRN_SYSTEM` | empty | identifier system that defines the internal patient id |
+| `HA_FHIR_PAGE_SIZE` / `HA_FHIR_MAX_PAGES` | `100` / `20` | bounds on every search |
+| `HA_FHIR_WRITE_ENABLED` | `false` | post-approval Appointment write-back |
 
 See `.env.example`.
+
+---
+
+## FHIR integration
+
+Read the full mapping and its gaps in [`docs/FHIR.md`](docs/FHIR.md).
+
+```bash
+ha-agent fhir check --base-url https://hapi.fhir.org/baseR4
+ha-agent fhir sync --from https://fhir.example.org/r4 --dry-run
+ha-agent fhir sync --from https://fhir.example.org/r4
+ha-agent fhir links --limit 20
+```
+
+Four resources are ingested — `Patient`, `Coverage`, `Appointment`, `Claim` — and
+exactly one is written back: an approved `schedule_appointment` becomes a FHIR
+`Appointment`. Two properties matter more than coverage:
+
+- **Idempotent.** External identity lives in `fhir_links`, so a nightly full pull
+  updates rows instead of duplicating them, and re-running reports zero creates.
+- **Non-destructive.** FHIR only owns the fields it actually provides. Locally
+  tuned `risk_score`, document checklists, prior no-show counts and travel
+  distance survive a re-sync.
+
+A resource that cannot be loaded faithfully is **skipped and reported**, not
+defaulted: a Patient with no birth date, a Claim whose patient is unknown, an
+Appointment in `entered-in-error`. The report carries ids and reasons, never
+names or clinical text.
+
+Write-back is ordered FHIR-first: if the server rejects the appointment, no local
+row is created and the approval can be retried. The alternative leaves the
+schedule and the EHR disagreeing.
 
 ---
 
@@ -292,7 +329,7 @@ point multiple workers at one SQLite file.
 ## Tests and evaluation
 
 ```bash
-make test    # 65 tests: scoring, policy, tools, agent loop, API, MCP
+make test    # 109 tests: scoring, policy, tools, agent loop, API, MCP, FHIR
 make eval    # 13 golden cases, writes eval/latest-report.md
 ```
 
@@ -310,22 +347,25 @@ src/hospital_agent/
   llm/            planner protocol, OpenAI-compatible client, deterministic planner
   tools/          registry (the choke point) + 14 tools + explainable scoring
   policy/         JSON rules + engine
+  fhir/           R4 client, mapping, ingest, appointment write-back
   api/            FastAPI app, auth, rate limiting
   audit.py        hash chain
   redact.py       PHI masking
   store.py        SQLite schema, seed, repositories
 mcp_server/       bridge (shared), SDK server, stdlib fallback, __main__
-tests/            65 tests
+tests/            109 tests
 eval/             cases.json, run_eval.py, latest-report.md
-docs/             ARCHITECTURE.md, RUNBOOK.md
+docs/             ARCHITECTURE.md, RUNBOOK.md, FHIR.md
 ```
 
 ---
 
 ## Honest limitations (read before production)
 
-- **Synthetic data only.** `store.py` seeds 44 fake patients. There is no EHR integration; that is
-  the next real project (HL7v2/FHIR ingestion, or read replicas).
+- **The seed is synthetic.** `store.py` seeds 44 fake patients. A FHIR R4 read path exists
+  (`docs/FHIR.md`), but there is no HL7v2, no bulk `$export`, no incremental `_lastUpdated` sync and
+  no propagation of deletions or merges. Treat the integration as a working read adapter, not a
+  finished interface: point it at a test server before any real one.
 - **Scores are rules, not validated models.** The weights are defensible priors, not trained on
   your population. Treat them as decision support and recalibrate against local outcomes.
 - **The agent is not a clinician.** Prompts and tools keep it administrative; this is not a

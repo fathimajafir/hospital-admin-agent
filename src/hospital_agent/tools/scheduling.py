@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..fhir.writeback import mirror_appointment
 from ..models import utcnow
 from .registry import ToolContext, ToolSpec
 from .scoring import no_show_probability
@@ -172,19 +173,31 @@ def schedule_appointment(ctx: ToolContext, args: ScheduleArgs) -> dict[str, Any]
         raise ValueError(f"{args.provider} is already booked at {args.start_ts}")
 
     lead_days = max(0, (start.date() - datetime.now(timezone.utc).date()).days)
-    appt = ctx.store.create_appointment(
-        {
-            "id": f"A{abs(hash((args.patient_id, args.start_ts))) % 10_000:04d}",
-            "patient_id": args.patient_id,
-            "dept": args.dept,
-            "provider": args.provider,
-            "start_ts": start.isoformat(timespec="seconds"),
-            "appt_type": args.appt_type,
-            "lead_days": lead_days,
-            "prior_no_shows": 0,
-            "distance_km": 10.0,
-        }
-    )
+    # Deterministic, not ``hash()``: the id must survive a process restart so a
+    # retried approval cannot create a second appointment (or a second FHIR one).
+    fingerprint = hashlib.sha256(f"{args.patient_id}|{start.isoformat(timespec='seconds')}".encode()).hexdigest()
+    payload = {
+        "id": f"A{fingerprint[:8]}",
+        "patient_id": args.patient_id,
+        "dept": args.dept,
+        "provider": args.provider,
+        "start_ts": start.isoformat(timespec="seconds"),
+        "appt_type": args.appt_type,
+        "lead_days": lead_days,
+        "prior_no_shows": 0,
+        "distance_km": 10.0,
+    }
+
+    if ctx.store.get_appointment(payload["id"]) is not None:
+        raise ValueError(f"appointment {payload['id']} already exists for {args.patient_id}")
+
+    # When an EHR is connected this writes the FHIR Appointment first: if the
+    # server refuses, nothing is booked locally and the approval can be retried.
+    mirrored = mirror_appointment(ctx.settings, appointment=payload, patient=patient, store=ctx.store)
+
+    appt = ctx.store.create_appointment(payload)
+    if mirrored.written:
+        ctx.store.link_fhir(mirrored.source, "Appointment", str(mirrored.external_id), appt["id"])
     risk = no_show_probability(
         lead_days=lead_days,
         prior_no_shows=0,
@@ -192,11 +205,16 @@ def schedule_appointment(ctx: ToolContext, args: ScheduleArgs) -> dict[str, Any]
         payer=patient["payer"],
         distance_km=10.0,
     )
-    return {
+    result: dict[str, Any] = {
         "appointment": appt,
         "no_show_risk": risk,
         "reminders": ["72h confirmation", "24h reminder"] if risk["probability"] >= 0.35 else ["24h reminder"],
     }
+    if mirrored.written:
+        result["external"] = {"system": "fhir", "source": mirrored.source, "id": mirrored.external_id}
+    if mirrored.warnings:
+        result["warnings"] = mirrored.warnings
+    return result
 
 
 def scheduling_tools() -> list[ToolSpec]:

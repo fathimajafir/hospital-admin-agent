@@ -56,6 +56,25 @@ def main(argv: list[str] | None = None) -> int:
     seed = sub.add_parser("seed", help="seed the synthetic dataset")
     seed.add_argument("--reset", action="store_true")
 
+    fhir = sub.add_parser("fhir", help="FHIR R4 ingest and connectivity")
+    fhir_sub = fhir.add_subparsers(dest="fhir_command", required=True)
+
+    fhir_sync = fhir_sub.add_parser("sync", help="pull resources into the local store")
+    fhir_sync.add_argument(
+        "--from",
+        dest="source",
+        required=True,
+        help="FHIR base URL (e.g. https://hapi.fhir.org/baseR4) or a Bundle JSON file",
+    )
+    fhir_sync.add_argument("--types", default=",".join(("Patient", "Coverage", "Appointment", "Claim")))
+    fhir_sync.add_argument("--dry-run", action="store_true", help="report what would change, write nothing")
+
+    fhir_check = fhir_sub.add_parser("check", help="read the server CapabilityStatement")
+    fhir_check.add_argument("--base-url", default=None, help="defaults to HA_FHIR_BASE_URL")
+
+    fhir_links = fhir_sub.add_parser("links", help="show FHIR resource to local row mappings")
+    fhir_links.add_argument("--limit", type=int, default=50)
+
     args = parser.parse_args(argv)
     settings = Settings()
     container = Container.build(settings, log_stream=sys.stderr)
@@ -108,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"seeded": True, "beds": len(container.store.beds())}))
         return 0
 
+    if args.command == "fhir":
+        return _fhir(args, container, settings)
+
     if args.command == "serve":
         import uvicorn
 
@@ -115,6 +137,64 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return 1
+
+
+def _fhir(args: argparse.Namespace, container: Container, settings: Settings) -> int:
+    from pathlib import Path
+
+    from .fhir import FhirClient, FhirIngest
+    from .fhir.errors import FhirError
+
+    if args.fhir_command == "links":
+        print(json.dumps(container.store.fhir_links(args.limit), indent=2))
+        return 0
+
+    if args.fhir_command == "check":
+        base = args.base_url or settings.fhir_base_url
+        if not base:
+            print("no FHIR base URL: pass --base-url or set HA_FHIR_BASE_URL", file=sys.stderr)
+            return 2
+        with FhirClient(base, token=settings.fhir_token or None, timeout_s=settings.fhir_timeout_s) as client:
+            capability = client.capability()
+        rest = (capability.get("rest") or [{}])[0]
+        summary = {
+            "source": base,
+            "fhir_version": capability.get("fhirVersion"),
+            "software": (capability.get("software") or {}).get("name"),
+            "resources": sorted({r.get("type") for r in rest.get("resource") or [] if r.get("type")}),
+        }
+        print(json.dumps(summary, indent=2))
+        return 0
+
+    ingest = FhirIngest(container.store, settings, audit=container.audit)
+    types = [t.strip() for t in args.types.split(",") if t.strip()]
+    source = args.source
+
+    try:
+        if source.startswith(("http://", "https://")):
+            with FhirClient(
+                source,
+                token=settings.fhir_token or None,
+                timeout_s=settings.fhir_timeout_s,
+                page_size=settings.fhir_page_size,
+                max_pages=settings.fhir_max_pages,
+                verify=settings.fhir_verify_tls,
+            ) as client:
+                report = ingest.sync(client, types, dry_run=args.dry_run)
+        else:
+            path = Path(source).expanduser()
+            if not path.is_file():
+                print(f"not an http(s) URL and not a file: {source}", file=sys.stderr)
+                return 2
+            report = ingest.apply_bundle(
+                json.loads(path.read_text()), source=f"file:{path.name}", dry_run=args.dry_run
+            )
+    except FhirError as exc:
+        print(json.dumps({"error": exc.to_dict()}, indent=2), file=sys.stderr)
+        return 1
+
+    print(json.dumps(report.to_dict(), indent=2))
+    return 0
 
 
 def _demo() -> None:  # pragma: no cover - convenience for `python -m hospital_agent.cli`

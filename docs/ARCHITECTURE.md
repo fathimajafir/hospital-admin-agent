@@ -129,6 +129,7 @@ approvals      one row per gated action (status: pending→approved→executed)
 runs           full agent state (messages/steps/usage) for resume + debugging
 audit          append-only, hash-chained
 idempotency    key → first response
+fhir_links     (source, resource_type, resource_id) → internal_id
 ```
 
 **Why SQLite?** It makes the whole thing runnable with zero infrastructure and keeps the demo
@@ -138,6 +139,10 @@ honest. It is also a hard scaling ceiling: one writer, no horizontal reads. The 
 **Seed data** is 44 synthetic patients across 6 wards (54 beds), 14 appointments, 12 claims,
 10 discharge plans and a roster with two deliberate night-shift gaps. It is generated with fixed
 seeds, so every run and every test sees the same world.
+
+The same tables can be filled from a FHIR R4 server instead: `ha-agent fhir sync` maps `Patient`,
+`Coverage`, `Appointment` and `Claim`, and records the external identity in `fhir_links`. Mapping
+rules, and the resources it refuses to load, are in [`FHIR.md`](FHIR.md).
 
 ---
 

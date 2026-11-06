@@ -126,6 +126,14 @@ CREATE TABLE IF NOT EXISTS audit (
     prev_hash TEXT NOT NULL,
     hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS fhir_links (
+    source TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    internal_id TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY (source, resource_type, resource_id)
+);
 CREATE TABLE IF NOT EXISTS idempotency (
     key TEXT PRIMARY KEY,
     tool TEXT NOT NULL,
@@ -135,6 +143,7 @@ CREATE TABLE IF NOT EXISTS idempotency (
 CREATE INDEX IF NOT EXISTS idx_beds_ward ON beds(ward);
 CREATE INDEX IF NOT EXISTS idx_appts_start ON appointments(start_ts);
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
+CREATE INDEX IF NOT EXISTS idx_fhir_links_internal ON fhir_links(source, resource_type, internal_id);
 """
 
 WARD_SPECS: dict[str, dict[str, Any]] = {
@@ -454,6 +463,10 @@ class Store:
         params.append(limit)
         return [dict(r) for r in self._q(sql, params)]
 
+    def get_appointment(self, appointment_id: str) -> dict[str, Any] | None:
+        row = self._one("SELECT * FROM appointments WHERE id = ?", (appointment_id,))
+        return dict(row) if row else None
+
     def create_appointment(self, payload: dict[str, Any]) -> dict[str, Any]:
         appt_id = payload["id"]
         self._exec(
@@ -512,6 +525,133 @@ class Store:
             rows = self._q("SELECT * FROM staff_shifts WHERE ward = ? ORDER BY shift, role", (ward,))
         else:
             rows = self._q("SELECT * FROM staff_shifts ORDER BY ward, shift, role")
+        return [dict(r) for r in rows]
+
+    # -- external identity (FHIR) -----------------------------------------
+    # Upserts are field-scoped on purpose. FHIR is authoritative for the fields
+    # it owns; risk_score, documents, prior_no_shows and distance_km are local
+    # state and must survive a re-sync untouched.
+    def upsert_patient(self, row: dict[str, Any]) -> str:
+        payload = (
+            row["mrn"],
+            row["name"],
+            row["dob"],
+            row.get("phone") or "",
+            row.get("email") or "",
+            row.get("address") or "",
+        )
+        exists = self._one("SELECT id FROM patients WHERE id = ?", (row["id"],)) is not None
+        if exists:
+            self._exec(
+                "UPDATE patients SET mrn=?,name=?,dob=?,phone=?,email=?,address=? WHERE id=?",
+                (*payload, row["id"]),
+            )
+        else:
+            self._exec(
+                "INSERT INTO patients (id,mrn,name,dob,phone,email,address,payer,risk_score,"
+                "allergies,documents,primary_care,created_at) VALUES (?,?,?,?,?,?,?,?,0,'[]','[]',?,?)",
+                (row["id"], *payload, row.get("payer") or "", None, utcnow()),
+            )
+        return "updated" if exists else "created"
+
+    def patch_patient_payer(self, patient_id: str, payer: str) -> bool:
+        if not payer:
+            return False
+        updated = self._one("SELECT id FROM patients WHERE id = ?", (patient_id,))
+        if updated is None:
+            return False
+        self._exec("UPDATE patients SET payer=? WHERE id=?", (payer, patient_id))
+        return True
+
+    def upsert_appointment(self, row: dict[str, Any]) -> str:
+        exists = self._one("SELECT id FROM appointments WHERE id = ?", (row["id"],)) is not None
+        if exists:
+            self._exec(
+                "UPDATE appointments SET patient_id=?,dept=?,provider=?,start_ts=?,status=?,appt_type=?,"
+                "lead_days=? WHERE id=?",
+                (
+                    row["patient_id"],
+                    row["dept"],
+                    row["provider"],
+                    row["start_ts"],
+                    row["status"],
+                    row["appt_type"],
+                    int(row.get("lead_days", 0)),
+                    row["id"],
+                ),
+            )
+        else:
+            self._exec(
+                "INSERT INTO appointments (id,patient_id,dept,provider,start_ts,status,appt_type,"
+                "lead_days,prior_no_shows,distance_km,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    row["id"],
+                    row["patient_id"],
+                    row["dept"],
+                    row["provider"],
+                    row["start_ts"],
+                    row["status"],
+                    row["appt_type"],
+                    int(row.get("lead_days", 0)),
+                    0,
+                    0.0,
+                    utcnow(),
+                ),
+            )
+        return "updated" if exists else "created"
+
+    def upsert_claim(self, row: dict[str, Any]) -> str:
+        exists = self._one("SELECT id FROM claims WHERE id = ?", (row["id"],)) is not None
+        values = (
+            row["patient_id"],
+            row["payer"],
+            row["cpt"],
+            row["icd10"],
+            int(row["amount_cents"]),
+            int(row["auth_on_file"]),
+            row.get("submitted_at"),
+            row["status"],
+        )
+        if exists:
+            self._exec(
+                "UPDATE claims SET patient_id=?,payer=?,cpt=?,icd10=?,amount_cents=?,auth_on_file=?,"
+                "submitted_at=?,status=? WHERE id=?",
+                (*values, row["id"]),
+            )
+        else:
+            self._exec(
+                "INSERT INTO claims (id,patient_id,payer,cpt,icd10,amount_cents,auth_on_file,"
+                "submitted_at,status) VALUES (?,?,?,?,?,?,?,?,?)",
+                (row["id"], *values),
+            )
+        return "updated" if exists else "created"
+
+    # -- FHIR links --------------------------------------------------------
+    def link_fhir(self, source: str, resource_type: str, resource_id: str, internal_id: str) -> None:
+        self._exec(
+            "INSERT INTO fhir_links (source,resource_type,resource_id,internal_id,synced_at) "
+            "VALUES (?,?,?,?,?) ON CONFLICT(source,resource_type,resource_id) DO UPDATE SET "
+            "internal_id=excluded.internal_id, synced_at=excluded.synced_at",
+            (source, resource_type, resource_id, internal_id, utcnow()),
+        )
+
+    def internal_for_fhir(self, source: str, resource_type: str, resource_id: str) -> str | None:
+        row = self._one(
+            "SELECT internal_id FROM fhir_links WHERE source=? AND resource_type=? AND resource_id=?",
+            (source, resource_type, resource_id),
+        )
+        return row["internal_id"] if row else None
+
+    def external_for_internal(self, source: str, resource_type: str, internal_id: str) -> str | None:
+        row = self._one(
+            "SELECT resource_id FROM fhir_links WHERE source=? AND resource_type=? AND internal_id=? "
+            "ORDER BY synced_at DESC LIMIT 1",
+            (source, resource_type, internal_id),
+        )
+        return row["resource_id"] if row else None
+
+    def fhir_links(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._q("SELECT * FROM fhir_links ORDER BY synced_at DESC LIMIT ?", (limit,))
         return [dict(r) for r in rows]
 
     # -- approvals ---------------------------------------------------------

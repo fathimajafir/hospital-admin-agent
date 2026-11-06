@@ -1,0 +1,136 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "fhir-pat-1",
+        "identifier": [
+          {"system": "http://hospital.example.org/mrn", "type": {"coding": [{"code": "MR"}]}, "value": "200001"}
+        ],
+        "name": [{"use": "official", "given": ["Ana", "Maria"], "family": "Silva"}],
+        "birthDate": "1979-03-14",
+        "telecom": [
+          {"system": "phone", "value": "555-0201"},
+          {"system": "email", "value": "ana.silva@example.org"}
+        ],
+        "address": [{"line": ["12 Oak Street"], "city": "Testville", "state": "TS", "postalCode": "00501"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "fhir-pat-2",
+        "name": [{"text": "Bo Chen"}],
+        "telecom": [{"system": "phone", "value": "555-0202"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "id": "fhir-pat-3",
+        "name": [{"given": ["Cara"], "family": "Diaz"}],
+        "birthDate": "1990-07-02"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Coverage",
+        "id": "cov-1",
+        "status": "active",
+        "beneficiary": {"reference": "Patient/fhir-pat-1"},
+        "payor": [{"display": "BlueShield"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Coverage",
+        "id": "cov-orphan",
+        "status": "active",
+        "beneficiary": {"reference": "Patient/does-not-exist"},
+        "payor": [{"display": "Aetna"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "appt-1",
+        "status": "booked",
+        "start": "2026-12-01T09:00:00Z",
+        "created": "2026-11-20T15:30:00Z",
+        "serviceType": {"text": "Orthopedics"},
+        "appointmentType": {"text": "Follow-up"},
+        "participant": [
+          {"actor": {"reference": "Patient/fhir-pat-1"}, "status": "accepted"},
+          {"actor": {"reference": "Practitioner/pr-1", "display": "Dr. Example 2"}, "status": "accepted"}
+        ]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "appt-2",
+        "status": "cancelled",
+        "start": "2026-12-02T14:00:00+00:00",
+        "serviceType": {"coding": [{"code": "CARD", "display": "Cardiology"}]},
+        "participant": [{"actor": {"reference": "Patient/fhir-pat-3"}, "status": "accepted"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Appointment",
+        "id": "appt-3",
+        "status": "entered-in-error",
+        "start": "2026-12-03T10:00:00Z",
+        "participant": [{"actor": {"reference": "Patient/fhir-pat-1"}, "status": "accepted"}]
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Claim",
+        "id": "claim-1",
+        "status": "active",
+        "created": "2026-11-21T08:00:00Z",
+        "total": {"value": "3250.00", "currency": "USD"},
+        "insurer": {"display": "BlueShield"},
+        "item": [
+          {
+            "sequence": 1,
+            "productOrService": {"coding": [{"system": "http://www.ama-assn.org/go/cpt", "code": "27447"}]},
+            "preAuthRef": "AUTH-7781",
+            "net": {"value": "3250.00", "currency": "USD"}
+          }
+        ],
+        "diagnosis": [{"sequence": 1, "diagnosisCodeableConcept": {"coding": [{"code": "M17.11"}]}}],
+        "patient": {"reference": "Patient/fhir-pat-1"}
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Claim",
+        "id": "claim-2",
+        "status": "active",
+        "insurer": {"display": "SelfPay"},
+        "item": [
+          {
+            "sequence": 1,
+            "productOrService": {"text": "99213"},
+            "net": {"value": "125.00", "currency": "USD"}
+          }
+        ],
+        "patient": {"reference": "Patient/fhir-pat-3"}
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Claim",
+        "id": "claim-orphan",
+        "status": "active",
+        "total": {"value": "10.00"},
+        "item": [{"productOrService": {"text": "99213"}}],
+        "patient": {"reference": "Patient/does-not-exist"}
+      }
+    }
+  ]
+}

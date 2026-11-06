@@ -69,6 +69,19 @@ class Settings:
 
     api_keys_raw: str = field(default_factory=lambda: os.getenv("HA_API_KEYS", ""))
 
+    # -- FHIR integration --------------------------------------------------
+    # Read path is opt-in: with no base URL the server runs on the synthetic
+    # dataset alone. ``fhir_token`` is a bearer credential - it is never logged,
+    # never echoed in an error and never included in a sync report.
+    fhir_base_url: str = field(default_factory=lambda: os.getenv("HA_FHIR_BASE_URL", "").rstrip("/"))
+    fhir_token: str = field(default_factory=lambda: os.getenv("HA_FHIR_TOKEN", ""))
+    fhir_timeout_s: float = field(default_factory=lambda: _env_float("HA_FHIR_TIMEOUT_S", 30.0))
+    fhir_page_size: int = field(default_factory=lambda: _env_int("HA_FHIR_PAGE_SIZE", 100))
+    fhir_max_pages: int = field(default_factory=lambda: _env_int("HA_FHIR_MAX_PAGES", 20))
+    fhir_mrn_system: str | None = field(default_factory=lambda: os.getenv("HA_FHIR_MRN_SYSTEM") or None)
+    fhir_write_enabled: bool = field(default_factory=lambda: _env_bool("HA_FHIR_WRITE_ENABLED", False))
+    fhir_verify_tls: bool = field(default_factory=lambda: _env_bool("HA_FHIR_VERIFY_TLS", True))
+
     def principals(self) -> dict[str, Principal]:
         """Parse ``HA_API_KEYS`` into a key -> Principal map.
 

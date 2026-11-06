@@ -10,6 +10,8 @@
 - [ ] `GET /readyz` returns `status: ready` and the expected tool count (14)
 - [ ] `GET /v1/audit/verify` returns `intact: true`
 - [ ] MCP processes run with the **lowest** role that does the job (`analyst` by default)
+- [ ] If an EHR is connected: `HA_FHIR_BASE_URL`/`HA_FHIR_TOKEN` set, sync scheduled, and
+      `HA_FHIR_WRITE_ENABLED` still `false` until a read-only pilot is clean
 
 ```bash
 docker compose up --build -d
@@ -27,6 +29,42 @@ Keys are read at startup, so rotation is a restart:
 4. Remove the old key and restart again.
 
 The audit log records `actor` (principal `sub`), not the key — rotation does not break attribution.
+
+## FHIR sync
+
+Runs as a scheduled job, not from the API process. There is no queue and no
+background worker: `ha-agent fhir sync` is a batch command that exits.
+
+```bash
+# 03:15 nightly, dry run first when changing the mapping or the scopes
+15 3 * * *  cd /srv/hospital-admin-agent && HA_FHIR_BASE_URL=... \
+            .venv/bin/ha-agent fhir sync --from "$HA_FHIR_BASE_URL" \
+            >> /var/log/ha-fhir-sync.log 2>&1
+```
+
+Reading the report:
+
+| Field | Meaning |
+|---|---|
+| `created` | new rows. A steady nightly number means patients are being duplicated — check `fhir_links` |
+| `updated` | normal. Everything already known |
+| `skipped` | not loaded. Each one has a `warnings[]` entry naming the resource and the reason |
+| `warnings_dropped` | above 200 the list is truncated; the count still tells you the size of the problem |
+
+- **401/403** — token missing, expired or missing scopes. The error text carries the
+  server's `OperationOutcome` diagnostics. Rotate `HA_FHIR_TOKEN` and re-run; the
+  job is idempotent, so a re-run after a partial failure is safe.
+- **502 on booking** — the server rejected an approved appointment. Nothing was
+  written locally; the approval is still executable, so fix the cause and retry
+  the approval. Do not re-book by hand.
+- **`created` growing every night** — the MRN identifier system probably changed.
+  Check `HA_FHIR_MRN_SYSTEM` against what the server actually sends.
+- **302 in an error** — the base URL redirects. Set `HA_FHIR_BASE_URL` to the final
+  address; redirects are not followed on purpose (the token would go with them).
+
+Turning on `HA_FHIR_WRITE_ENABLED` is a one-way door for workflow: after the first
+successful write-back, staff will expect the EHR and the schedule to agree. Run a
+read-only pilot first, and keep the flag off until the mapping report is clean.
 
 ## Approvals
 
