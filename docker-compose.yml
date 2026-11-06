@@ -1,0 +1,42 @@
+services:
+  api:
+    build: .
+    image: hospital-admin-agent:1.0.0
+    env_file:
+      - .env
+    environment:
+      HA_DB_PATH: /data/hospital.db
+      HA_ENV: prod
+    ports:
+      - "8080:8080"
+    volumes:
+      - hospital-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # Optional: the MCP server as a separate, equally-locked-down process.
+  mcp:
+    build: .
+    image: hospital-admin-agent:1.0.0
+    env_file:
+      - .env
+    environment:
+      HA_DB_PATH: /data/hospital.db
+      HA_MCP_ROLE: analyst
+      HA_MCP_PURPOSE: operations
+    command: ["python", "-m", "mcp_server.server", "--transport", "http", "--host", "0.0.0.0", "--port", "8765"]
+    ports:
+      - "8765:8765"
+    volumes:
+      - hospital-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  hospital-data:

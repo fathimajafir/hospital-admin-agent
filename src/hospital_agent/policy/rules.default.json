@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "comment": "Role -> permission grants, and per-tool requirements. Deny-by-default.",
+  "roles": {
+    "service": [
+      "read"
+    ],
+    "analyst": [
+      "read",
+      "analytics"
+    ],
+    "scheduler": [
+      "read",
+      "write",
+      "schedule"
+    ],
+    "billing": [
+      "read",
+      "write",
+      "financial"
+    ],
+    "clinician": [
+      "read",
+      "write",
+      "clinical",
+      "phi"
+    ],
+    "admin": [
+      "*"
+    ]
+  },
+  "tools": {
+    "capacity_snapshot": {
+      "permissions": [
+        "read"
+      ]
+    },
+    "discharge_board": {
+      "permissions": [
+        "read"
+      ]
+    },
+    "staffing_gaps": {
+      "permissions": [
+        "read"
+      ]
+    },
+    "quality_indicators": {
+      "permissions": [
+        "read",
+        "analytics"
+      ]
+    },
+    "ops_digest": {
+      "permissions": [
+        "read",
+        "analytics"
+      ]
+    },
+    "patient_get": {
+      "permissions": [
+        "read",
+        "phi"
+      ]
+    },
+    "patient_search": {
+      "permissions": [
+        "read",
+        "phi"
+      ]
+    },
+    "appointment_risk": {
+      "permissions": [
+        "read"
+      ]
+    },
+    "find_appointment_slots": {
+      "permissions": [
+        "read"
+      ]
+    },
+    "schedule_appointment": {
+      "permissions": [
+        "write",
+        "schedule"
+      ],
+      "requires_approval": true
+    },
+    "bed_assign": {
+      "permissions": [
+        "write",
+        "clinical"
+      ],
+      "requires_approval": true
+    },
+    "claim_scrub": {
+      "permissions": [
+        "read",
+        "financial"
+      ]
+    },
+    "billing_summary": {
+      "permissions": [
+        "read",
+        "financial"
+      ]
+    },
+    "build_prior_auth_packet": {
+      "permissions": [
+        "read",
+        "financial",
+        "phi"
+      ],
+      "purpose_required": true
+    }
+  },
+  "default": {
+    "permissions": [
+      "admin"
+    ]
+  }
+}

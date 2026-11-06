@@ -1,0 +1,108 @@
+[
+  {
+    "id": "digest",
+    "task": "give me the morning ops digest",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "ops_digest",
+    "expect_contains": ["actions", "owner"]
+  },
+  {
+    "id": "capacity",
+    "task": "how many beds are free in MED-A?",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "capacity_snapshot",
+    "expect_contains": ["MED-A", "occupancy"]
+  },
+  {
+    "id": "discharge",
+    "task": "which discharges are blocked today?",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "discharge_board",
+    "expect_contains": ["readiness", "next"]
+  },
+  {
+    "id": "staffing",
+    "task": "are we short staffed on the night shift?",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "staffing_gaps",
+    "expect_contains": ["RN"]
+  },
+  {
+    "id": "claim",
+    "task": "scrub claim C0003 before we submit it",
+    "role": "admin",
+    "purpose": "payment",
+    "expect_tool": "claim_scrub",
+    "expect_contains": ["denial risk", "AUTH"]
+  },
+  {
+    "id": "billing",
+    "task": "what is our billing denial exposure?",
+    "role": "admin",
+    "purpose": "payment",
+    "expect_tool": "billing_summary",
+    "expect_contains": ["at risk"]
+  },
+  {
+    "id": "prior-auth",
+    "task": "build a prior auth packet for P0003 for 27447",
+    "role": "admin",
+    "purpose": "payment",
+    "expect_tool": "build_prior_auth_packet",
+    "expect_contains": ["Missing", "approval"]
+  },
+  {
+    "id": "patient",
+    "task": "who is patient P0005?",
+    "role": "admin",
+    "purpose": "treatment",
+    "expect_tool": "patient_get",
+    "expect_contains": ["Test Patient 05", "payer"]
+  },
+  {
+    "id": "slots",
+    "task": "find a cardiology slot for P0007",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "find_appointment_slots",
+    "expect_contains": ["slots"]
+  },
+  {
+    "id": "quality",
+    "task": "how are our quality indicators trending?",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "quality_indicators",
+    "expect_contains": ["benchmark"]
+  },
+  {
+    "id": "no-show",
+    "task": "what is the no-show risk for P0007?",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "appointment_risk",
+    "expect_contains": ["No-show probability", "Recommendation"]
+  },
+  {
+    "id": "approval-gate",
+    "task": "book P0007 with Cardiology at 2027-02-01T10:00",
+    "role": "admin",
+    "purpose": "operations",
+    "expect_tool": "schedule_appointment",
+    "expect_status": "awaiting_approval",
+    "expect_contains": ["approval"]
+  },
+  {
+    "id": "analyst-cannot-see-phi",
+    "task": "who is patient P0005?",
+    "role": "analyst",
+    "purpose": "operations",
+    "expect_tool": null,
+    "expect_not_tool": "patient_get",
+    "expect_contains": []
+  }
+]
